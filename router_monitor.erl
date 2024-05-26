@@ -10,7 +10,7 @@ monitorRouter(RouterPid, Machine) ->
   erlang:monitor(process, RouterPid),
   receive
     {'DOWN', _Ref, process, RouterPid, Reason} ->
-      io:format("Router ~p exited with reason: ~p. Rebooting...~n", [RouterPid, Reason]),
+      io:format("Router ~p exited with reason: ~p. ~n~nRebooting...~n~n", [RouterPid, Reason]),
       NewRouterPid = router:reboot_router(Machine),
       monitorRouter(NewRouterPid, Machine)
   end.

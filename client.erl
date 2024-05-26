@@ -1,5 +1,5 @@
 -module(client).
--export([start/3, add_machine/1, loop/3, send_msg/2]).
+-export([start/3, send_message/2]).
 
 start(Name, RouterName, Machine) ->
   UserPid = spawn(fun() ->
@@ -8,10 +8,7 @@ start(Name, RouterName, Machine) ->
   register(Name, UserPid),
   {RouterName, Machine} ! {connect, UserPid, Name}.
 
-add_machine(Machine) ->
-  net_adm:ping(Machine).
-
-send_msg(Username, Message) ->
+send_message(Username, Message) ->
   {Username, node(self())} ! {Message}.
 
 loop(ServerPid, ServerName, Username) ->
@@ -40,6 +37,6 @@ loop(ServerPid, ServerName, Username) ->
       io:format("Server ~p is down!~n", [ServerName]),
       exit(normal);
     Other ->
-      io:format("Received unsupported message: ~p~n", [Other]),
+      io:format("Unsupported message: ~p~n", [Other]),
       loop(ServerPid, ServerName, Username)
   end.

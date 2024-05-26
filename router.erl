@@ -1,5 +1,5 @@
 -module(router).
--export([start/2, handle_monitors/3, reboot_router/1]).
+-export([start/2, reboot_router/1]).
 
 start(RouterName, Machine) ->
   RouterPid = spawn(fun() -> init([], [], Machine) end),
@@ -9,9 +9,9 @@ start(RouterName, Machine) ->
   RouterPid.
 
 init(ServerMonitors, Users, Machine) ->
-  handle_monitors(ServerMonitors, Users, Machine).
+  manage_monitors(ServerMonitors, Users, Machine).
 
-handle_monitors(ServerMonitors, Users, Machine) ->
+manage_monitors(ServerMonitors, Users, Machine) ->
   io:format("ServerMonitors: ~p, Users: ~p, Machine: ~p~n",
     [ServerMonitors, Users, Machine]),
   receive
@@ -20,29 +20,29 @@ handle_monitors(ServerMonitors, Users, Machine) ->
       NewServerMonitor = {ServerMonitorPid, ServerName, ServerPid},
       NewServerMonitors = [NewServerMonitor | ServerMonitors],
       io:format("Router added Server Monitor ~p~n", [ServerMonitorPid]),
-      handle_monitors(NewServerMonitors, Users, Machine);
+      manage_monitors(NewServerMonitors, Users, Machine);
     {'DOWN', _Ref, process, ServerMonitorPid, Reason} ->
       ServerMonitor = lists:keyfind(ServerMonitorPid, 1, ServerMonitors),
-      io:format("ServerMonitor ~p exited with reason: ~p. Rebooting...~n", [ServerMonitorPid, Reason]),
+      io:format("ServerMonitor ~p exited with reason: ~p. ~n~nRebooting...~n~n", [ServerMonitorPid, Reason]),
       {ServerMonitorPid, ServerName, ServerPid} = ServerMonitor,
       NewServerMonitorPid = server_monitor:reboot_serverMonitor(ServerName, ServerPid, self(), Machine),
       NewServerMonitor = {NewServerMonitorPid, ServerName, ServerPid},
       NewServerMonitors = [NewServerMonitor | ServerMonitors],
       ServerMonitors = lists:delete(ServerMonitor, ServerMonitors),
-      handle_monitors(NewServerMonitors, Users, Machine);
+      manage_monitors(NewServerMonitors, Users, Machine);
     {connect, UserPid, Username} ->
-      handle_users(ServerMonitors, Users, UserPid, Username, Machine);
+      manage_users(ServerMonitors, Users, UserPid, Username, Machine);
     Other ->
       io:format("Unhandled message: ~p~n", [Other]),
-      handle_monitors(ServerMonitors, Users, Machine)
+      manage_monitors(ServerMonitors, Users, Machine)
   end.
 
 
-handle_users(ServerMonitors, Users, UserPid, Username, Machine) ->
+manage_users(ServerMonitors, Users, UserPid, Username, Machine) ->
   case ServerMonitors of
     [] ->
       io:format("No servers available to handle user ~p~n", [UserPid]),
-      handle_monitors(ServerMonitors, Users, Machine);
+      manage_monitors(ServerMonitors, Users, Machine);
     _ ->
       ServerCount = length(ServerMonitors),
       CurrentIndex = length(Users) rem ServerCount,
@@ -50,7 +50,7 @@ handle_users(ServerMonitors, Users, UserPid, Username, Machine) ->
       io:format("~p assigned to server ~p~n", [UserPid, ServerPid]),
       {ServerName, node(ServerPid)} ! {join, UserPid, Username},
       NewUsers = [UserPid | Users],
-      handle_monitors(ServerMonitors, NewUsers, Machine)
+      manage_monitors(ServerMonitors, NewUsers, Machine)
   end.
 
 reboot_router(Machine) ->
