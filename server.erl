@@ -1,64 +1,57 @@
 -module(server).
--export([start/1]).
+-export([start/3, add_machine/1, reboot/1]).
 
-start(Server) ->
-    register(Server, spawn(fun() -> init([], Server) end)).
+start(ServerName, RouterPid, Machine) ->
+  io:format("Server started at ~p~n", [ServerName]),
+  Pid = spawn(fun() -> init([], ServerName) end),
+  register(ServerName, Pid),
+  io:format("Server pid at ~p~n", [Pid]),
+  server_monitor:startMonitor(Pid, ServerName, RouterPid, Machine),
+  Pid.
 
-init(Users, Server) ->
-    handleClients(Users , Server).
+init(Users, ServerName) ->
+  handle_users(Users, ServerName).
 
-handleClients(Users, Server) ->
-    receive
-        {join, UserPid, Username, _} ->
-            monitor(process, UserPid),
-            io:format("User with username ~p joined the server ~p! :)~n", [Username, Server]),
-            NewUsers = [UserPid | Users],
-            UserPid ! {self(), joined},
-            broadcast_join(UserPid, Username, NewUsers),
-            io:format("New users: ~p~n", [NewUsers]),
-            handleClients(NewUsers, Server);
-        {leave, UserPid, Username, _} ->
-            io:format("User with username ~p left the server! :(~n", [Username]),
-            NewUsers = lists:delete(UserPid, Users),
-            io:format("New users: ~p~n", [NewUsers]),
-            UserPid ! {self(), left},
-            broadcast_left(UserPid, Username, NewUsers),
-            handleClients(NewUsers, Server);
-        {send, UserPid, Username, Message} ->
-            io:format("Message from ~p: ~p~n", [Username, Message]),
-            broadcast_message(UserPid, Username, Message, Users),
-            handleClients(Users, Server);
-        {'DOWN', _, _, UserPid, _} ->
-            io:format("User ~p died!~n", [UserPid]),
-            NewUsers = lists:delete(UserPid, Users),
-            broadcast_left(UserPid, UserPid, NewUsers),
-            io:format("New users: ~p~n", [NewUsers]),
-            handleClients(NewUsers, Server);
-        Other ->
-            io:format("Received unsupported message: ~p~n", [Other]),
-            handleClients(Users, Server)
-    end.
+add_machine(Machine) ->
+  net_adm:ping(Machine).
 
-broadcast_message(_, _, _, []) ->
-    ok;
-broadcast_message(UserPid, Username, Message, [User | RestClients]) when User == UserPid ->
-    broadcast_message(UserPid, Username, Message, RestClients);
-broadcast_message(UserPid, Username, Message, [User | RestClients]) ->
-    User ! {message, Username, Message},
-    broadcast_message(UserPid, Username, Message, RestClients).
+handle_users(Users, ServerName) ->
+  receive
+    {join, UserPid, Username} ->
+      monitor(process, UserPid),
+      io:format("~p joined the server ~p!~n", [Username, ServerName]),
+      NewUsers = [{Username, UserPid} | Users],
+      io:format("~p~n", [NewUsers]),
+      ServerPid = whereis(ServerName),
+      {Username, node(UserPid)} ! {joined, ServerPid, ServerName},
+      lists:foreach(fun({Name, Pid}) -> {Name, node(Pid)} ! {message, Username, "joined"} end, NewUsers),
+      io:format("New users: ~p~n", [NewUsers]),
+      handle_users(NewUsers, ServerName);
+    {leave, UserPid, Username, _} ->
+      io:format("~p as left the server ~p!~n", [Username, ServerName]),
+      NewUsers = lists:delete(UserPid, Users),
+      io:format("New users: ~p~n", [NewUsers]),
+      UserPid ! {self(), left},
+      lists:foreach(fun({Name, Pid}) -> {Name, node(Pid)} ! {message, Username, "left"} end, NewUsers),
+      handle_users(NewUsers, ServerName);
+    {send, _, Username, Message} ->
+      io:format("Message from ~p: ~p~n", [Username, Message]),
+      lists:foreach(fun({Name, Pid}) -> {Name, node(Pid)} ! {message, Username, Message} end, Users),
+      handle_users(Users, ServerName);
+    {'DOWN', _, _, UserPid, _} ->
+      io:format("~p died!~n", [UserPid]),
+      NewUser = lists:keyfind(UserPid, 2, Users),
+      NewUsers = lists:delete(NewUser, Users),
+      lists:foreach(fun({Name, Pid}) -> {Name, node(Pid)} ! {message, UserPid, "died"} end, NewUsers),
+      io:format("New users: ~p~n", [NewUsers]),
+      handle_users(NewUsers, ServerName);
+    Other ->
+      io:format("Unsupported message: ~p~n", [Other]),
+      handle_users(Users, ServerName)
+  end.
 
-broadcast_join(_, _, []) ->
-    ok;
-broadcast_join(UserPid, Username, [User | RestClients]) when User == UserPid ->
-    broadcast_join(UserPid, Username, RestClients);
-broadcast_join(UserPid, Username, [User | RestClients]) ->
-    User ! {broadJoin, Username},
-    broadcast_join(UserPid, Username, RestClients).
-
-broadcast_left(_, _, []) ->
-    ok;
-broadcast_left(UserPid, Username, [User | RestClients]) when User == UserPid ->
-    broadcast_left(UserPid, Username, RestClients);
-broadcast_left(UserPid, Username, [User | RestClients]) ->
-    User ! {broadLeft, Username},
-    broadcast_left(UserPid, Username, RestClients).
+reboot(ServerName) ->
+  io:format("Server started ~p~n", [ServerName]),
+  Pid = spawn(fun() -> init([], ServerName) end),
+  io:format("Server pid at ~p~n", [Pid]),
+  Pid.
